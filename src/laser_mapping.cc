@@ -13,7 +13,13 @@ bool LaserMapping::InitROS(ros::NodeHandle &nh) {
     SubAndPubToROS(nh);
 
     // localmap init (after LoadParams)
+#ifdef USE_IVDB
+    ivdb_ = std::make_shared<IVdb<PointType>>(ivdb_options);
+    LOG(INFO) << "USE IVDB";
+#else
     ivox_ = std::make_shared<IVoxType>(ivox_options_);
+    LOG(INFO) << "USE IVOX";
+#endif
 
     // esekf init
     std::vector<double> epsi(23, 0.001);
@@ -290,7 +296,11 @@ void LaserMapping::Run() {
         for (int i = 0; i < scan_undistort_->size(); i++) {
             PointBodyToWorld(&scan_undistort_->points[i], &scan_down_world_->points[i]);
         }
+#ifdef USE_IVDB
+        ivdb_->AddPoints(scan_down_world_->points);
+#else
         ivox_->AddPoints(scan_down_world_->points);
+#endif
         first_lidar_time_ = measures_.lidar_bag_time_;
         flg_first_scan_ = false;
         return;
@@ -333,8 +343,10 @@ void LaserMapping::Run() {
     // update local map
     Timer::Evaluate([&, this]() { MapIncremental(); }, "    Incremental Mapping");
 
+#ifndef USE_IVDB
     LOG(INFO) << "[ mapping ]: In num: " << scan_undistort_->points.size() << " downsamp " << cur_pts
               << " Map grid num: " << ivox_->NumValidGrids() << " effect num : " << effect_feat_num_;
+#endif
 
     // publish or save map pcd
     if (run_in_offline_) {
@@ -547,8 +559,13 @@ void LaserMapping::MapIncremental() {
 
     Timer::Evaluate(
         [&, this]() {
+#ifdef USE_IVDB
+            ivdb_->AddPoints(points_to_add);
+            ivdb_->AddPoints(point_no_need_downsample);
+#else
             ivox_->AddPoints(points_to_add);
             ivox_->AddPoints(point_no_need_downsample);
+#endif
         },
         "    IVox Add Points");
 }
@@ -579,7 +596,7 @@ void LaserMapping::ObsModel(state_ikfom &s, esekfom::dyn_share_datastruct<double
                 PointType &point_world = scan_down_world_->points[i];
 
                 /* transform to world frame */
-                common::V3F p_body = point_body.getVector3fMap();
+                auto p_body = Eigen::Map<const Eigen::Vector3f>(point_body.data);
                 point_world.getVector3fMap() = R_wl * p_body + t_wl;
                 point_world.intensity = point_body.intensity;
 
@@ -587,7 +604,11 @@ void LaserMapping::ObsModel(state_ikfom &s, esekfom::dyn_share_datastruct<double
                 if (ekfom_data.converge) {
                     /** Find the closest surfaces in the map **/
                     points_near.clear();
+#ifdef USE_IVDB
+                    ivdb_->GetClosestPoint(point_world, points_near, options::NUM_MATCH_POINTS);
+#else
                     ivox_->GetClosestPoint(point_world, points_near, options::NUM_MATCH_POINTS);
+#endif
                     point_selected_surf_[i] = points_near.size() >= options::MIN_NUM_MATCH_POINTS;
                     if (point_selected_surf_[i]) {
                         point_selected_surf_[i] =

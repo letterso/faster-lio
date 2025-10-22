@@ -11,8 +11,11 @@
 
 #include "imu_processing.hpp"
 #include "ivox3d/ivox3d.h"
+#include "ivdb/ivdb.hpp"
 #include "options.h"
 #include "pointcloud_preprocess.h"
+
+#define USE_IVDB
 
 namespace faster_lio {
 
@@ -82,6 +85,10 @@ class LaserMapping {
 
    private:
     /// modules
+#ifdef USE_IVDB
+    IVdb<PointType>::Options ivdb_options;
+    std::shared_ptr<IVdb<PointType>> ivdb_ = nullptr;             // localmap in ivdb
+#endif
     IVoxType::Options ivox_options_;
     std::shared_ptr<IVoxType> ivox_ = nullptr;                    // localmap in ivox
     std::shared_ptr<PointCloudPreprocess> preprocess_ = nullptr;  // point cloud preprocess
